@@ -102,15 +102,16 @@ jobs:
       - name: Sync TWRP source
         run: |
           set -o pipefail
-          # 必须 --depth=1：全量同步会写满运行器磁盘（Errno 28），浅克隆只需 ~50GB
-          repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          # 磁盘约束：全量同步会写满（Errno 28）；--depth=1 浅克隆又触发运行器被硬杀。
+          # 用 --partial-clone（blobless）折中：只要 ~50GB，且是标准 CI 做法。
+          repo init --partial-clone -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
           # GitHub 运行器会杀掉长时间无输出的 step，这里每 30s 打一行心跳
           (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) syncing..."; sleep 30; done) & KA=$!
           ok=0
           for i in 1 2 3; do
             echo "===== repo sync 第 $i 次 ====="
             if repo sync -c -j4 --force-sync 2>&1 | tee sync.log; then ok=1; break; fi
-            echo "----- 失败，尾部 20 行 -----"; tail -20 sync.log; echo "----- 磁盘 -----"; df -h .; sleep 5
+            echo "----- 失败，尾部 20 行 -----"; tail -20 sync.log; echo "----- 磁盘/内存 -----"; df -h .; free -h; sleep 5
           done
           kill $KA 2>/dev/null || true
           if [ "$ok" != "1" ]; then echo "!!! repo sync 三次均失败"; exit 1; fi
