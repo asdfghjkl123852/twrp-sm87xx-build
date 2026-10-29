@@ -56,11 +56,14 @@ TARGET_BOOTLOADER_BOARD_NAME    := sun
 BOARD_USES_METADATA_PARTITION   := true
 TW_INCLUDE_CRYPTO               := true
 TW_INCLUDE_OMAPI                := true
-# --- Android 17 适配：metadata 加密 + FBE 的显式开关 ---
-# ColorOS 17 的 /data 仍是 metadata(FBE) + 硬件包裹密钥，必须同时打开下面两个开关，
-# 否则 TWRP 只会尝试 legacy FDE 路径，表现为 /data 显示 0MB 且输入 PIN 无反应。
-TW_INCLUDE_CRYPTO_FBE              := true
-TW_INCLUDE_FBE_METADATA_DECRYPTION := true
+# --- Android 17 适配说明（已用 17.0.0.100 原厂 recovery 验证，无需额外开关）---
+# TWRP 的 bootable/recovery/Android.mk 在 TW_INCLUDE_CRYPTO := true 时会自动：
+#   TW_INCLUDE_CRYPTO_FBE := true / -DTW_INCLUDE_FBE / -DTW_INCLUDE_FBE_METADATA_DECRYPT
+#   并链接 libkeymint_support、libgatekeeper_aidl、gatekeeper@1.0、weaver@1.0
+# 所以这里不需要（也不应该）再加开关：之前写的 TW_INCLUDE_FBE_METADATA_DECRYPTION
+# 是一个根本不存在的变量名，加了也不生效。
+# 原厂镜像核对结果：KeyMint 为 AIDL v3（IKeyMintDevice/default），与本树 prebuilt 声明一致；
+# /data 与 /metadata 的 fstab 参数与原厂逐字符一致。加密路径无需改动。
 
 # Debug
 TARGET_USES_LOGD                := true
