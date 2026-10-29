@@ -102,8 +102,18 @@ jobs:
       - name: Sync TWRP source
         run: |
           set -o pipefail
-          repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
-          repo sync -c -j4 --force-sync --no-clone-bundle --no-tags 2>&1 | tail -40
+          repo init -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          ok=0
+          for i in 1 2 3; do
+            echo "===== repo sync 第 $i 次 ====="
+            if repo sync -c -j4 --force-sync > sync.log 2>&1; then
+              ok=1; break
+            fi
+            echo "----- 失败，尾部 25 行 -----"; tail -25 sync.log; sleep 10
+          done
+          tail -40 sync.log
+          if [ "$ok" != "1" ]; then echo "!!! repo sync 三次均失败"; exit 1; fi
+          test -d build/make && echo "OK: build/make 就绪" || { echo "!!! 缺 build/make"; exit 1; }
           du -sh . 2>/dev/null | tail -1
           df -h .
 
@@ -153,7 +163,9 @@ jobs:
 
       - name: Save build log
         if: always()
-        run: cp build.log ./build.log.final 2>/dev/null || true
+        run: |
+          cp build.log ./build.log.final 2>/dev/null || true
+          cp sync.log ./sync.log.final 2>/dev/null || true
 
       - name: Upload recovery image
         if: success()
@@ -171,6 +183,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ inputs.variant }}
-          path: build.log.final
+          path: |
+            build.log.final
+            sync.log.final
           if-no-files-found: ignore
           retention-days: 14
