@@ -103,15 +103,15 @@ jobs:
         run: |
           set -o pipefail
           repo init -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          # GitHub 运行器会杀掉长时间无输出的 step，这里每 30s 打一行心跳
+          (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) syncing..."; sleep 30; done) & KA=$!
           ok=0
           for i in 1 2 3; do
             echo "===== repo sync 第 $i 次 ====="
-            if repo sync -c -j4 --force-sync > sync.log 2>&1; then
-              ok=1; break
-            fi
-            echo "----- 失败，尾部 25 行 -----"; tail -25 sync.log; sleep 10
+            if repo sync -c -j4 --force-sync 2>&1 | tee sync.log; then ok=1; break; fi
+            echo "----- 失败，尾部 20 行 -----"; tail -20 sync.log; sleep 5
           done
-          tail -40 sync.log
+          kill $KA 2>/dev/null || true
           if [ "$ok" != "1" ]; then echo "!!! repo sync 三次均失败"; exit 1; fi
           test -d build/make && echo "OK: build/make 就绪" || { echo "!!! 缺 build/make"; exit 1; }
           du -sh . 2>/dev/null | tail -1
@@ -148,7 +148,9 @@ jobs:
           lunch twrp_sm87xx
           env | grep -E '^TARGET_(PRODUCT|BUILD_VARIANT)=' || true
           df -h .
+          (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) building..."; sleep 30; done) & KA=$!
           make recoveryimage -j4 2>&1 | tee build.log
+          kill $KA 2>/dev/null || true
           ls -lh out/target/product/sm87xx/recovery.img
 
       - name: Collect artifact
