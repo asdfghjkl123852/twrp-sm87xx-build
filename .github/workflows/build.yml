@@ -1,0 +1,174 @@
+name: Build TWRP (sm87xx / OnePlus Ace 5 Pro PKR110)
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "baseline = 上游原样（先跑这个） / a17 = 叠加 Android 17 适配补丁"
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - a17
+      manifest_branch:
+        description: "TWRP 源码分支（官方最高只有 twrp-16.0）"
+        required: true
+        default: twrp-16.0
+      device_tree_url:
+        description: "设备树仓库"
+        required: true
+        default: https://github.com/kmiit/twrp_device_oplus_sm87xx
+      device_tree_branch:
+        description: "设备树分支"
+        required: true
+        default: twrp-16.0
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 关键：下一步会把扩容卷挂到 $GITHUB_WORKSPACE 覆盖掉 checkout 的内容，
+      # 所以 overlay 必须先搬到 /tmp（在根分区，体积很小不受影响）
+      - name: Stash overlay before volume mount
+        run: |
+          mkdir -p /tmp/overlay-stash
+          if [ "${{ inputs.variant }}" = "a17" ]; then
+            cp -a overlay/. /tmp/overlay-stash/
+            chmod 755 /tmp/overlay-stash/recovery/root/system/bin/a17-diag.sh
+            find /tmp/overlay-stash -type f | sed 's/^/  stashed: /'
+          else
+            echo "variant=baseline，不需要 overlay"
+          fi
+
+      # 运行器默认只有 ~14GB 可用，TWRP 源码+产物需 60GB+
+      - name: Free disk space
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 1024
+          temp-reserve-mb: 100
+          swap-size-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          max-size: 3G
+
+      # 16GB 内存编 AOSP 容易 OOM，zram 当额外 swap（失败了不致命，上面已有 4G swap）
+      - name: Setup zram
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y zram-tools || true
+          sudo modprobe zram || true
+          sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap 2>/dev/null || true
+          sudo systemctl restart zramswap 2>/dev/null || true
+          zramctl || true
+          free -h
+
+      - name: Install build dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip unzip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 libncurses5 lib32ncurses5-dev \
+            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils \
+            xsltproc fontconfig python3 python-is-python3 rsync bc \
+            libssl-dev device-tree-compiler lz4 zstd cpio kmod libelf-dev
+          # 用官方最新 repo launcher（apt 里的版本偏旧，可能不认新 manifest）
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
+          sudo install -m 755 /tmp/repo /usr/local/bin/repo
+          repo --version | head -2
+          git config --global user.name  "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          git config --global color.ui false
+          df -h .
+
+      - name: Sync TWRP source
+        run: |
+          set -o pipefail
+          repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          repo sync -c -j4 --force-sync --no-clone-bundle --no-tags 2>&1 | tail -40
+          du -sh . 2>/dev/null | tail -1
+          df -h .
+
+      - name: Clone device tree
+        run: |
+          set -e
+          mkdir -p device/oplus
+          git clone --depth=1 -b "${{ inputs.device_tree_branch }}" "${{ inputs.device_tree_url }}" device/oplus/sm87xx
+          ls device/oplus/sm87xx | head -20
+
+      - name: Apply Android 17 overlay
+        if: inputs.variant == 'a17'
+        run: |
+          set -e
+          cp -av /tmp/overlay-stash/. device/oplus/sm87xx/
+          chmod 755 device/oplus/sm87xx/recovery/root/system/bin/a17-diag.sh
+          echo "--- 已改动文件 ---"
+          cd device/oplus/sm87xx && git status --porcelain
+          grep -n "TW_INCLUDE_CRYPTO_FBE\|TW_INCLUDE_FBE_METADATA\|TW_DEVICE_VERSION" BoardConfig.mk
+
+      - name: Build recoveryimage
+        run: |
+          set -o pipefail
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          export USE_CCACHE=1
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_EXEC="$(command -v ccache || true)"
+          export CCACHE_MAXSIZE=3G
+          source build/envsetup.sh
+          # 与上游作者验证过的写法一致：只给 product 名，不带 release/variant
+          lunch twrp_sm87xx
+          env | grep -E '^TARGET_(PRODUCT|BUILD_VARIANT)=' || true
+          df -h .
+          make recoveryimage -j4 2>&1 | tee build.log
+          ls -lh out/target/product/sm87xx/recovery.img
+
+      - name: Collect artifact
+        if: success()
+        run: |
+          set -e
+          SRC=out/target/product/sm87xx/recovery.img
+          DST="TWRP-sm87xx-${{ inputs.variant }}-$(date +%Y%m%d).img"
+          cp "$SRC" "$DST"
+          ls -lh "$DST"
+          sha256sum "$DST" | tee "$DST.sha256"
+
+      - name: Save build log
+        if: always()
+        run: cp build.log ./build.log.final 2>/dev/null || true
+
+      - name: Upload recovery image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TWRP-sm87xx-${{ inputs.variant }}
+          path: |
+            TWRP-sm87xx-*.img
+            TWRP-sm87xx-*.img.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ inputs.variant }}
+          path: build.log.final
+          if-no-files-found: ignore
+          retention-days: 14
