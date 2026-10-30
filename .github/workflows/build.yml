@@ -92,47 +92,8 @@ jobs:
           # 磁盘约束：全量同步写满(Errno 28)；--partial-clone 太慢(6h超时)。
           # 用 --depth=1 浅克隆(~50GB)；-j2 避免大仓库并行 checkout 内存 OOM 被硬杀。
           repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
-          # 用本地清单移除 TWRP 恢复镜像用不到的大项目（cts/测试/模拟器/PGO），省 20~30GB
-          mkdir -p .repo/local_manifests
-          cat > .repo/local_manifests/remove.xml <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <manifest>
-            <remove-project name="platform/cts" />
-            <remove-project name="platform/tools/tradefederation/contrib" />
-            <remove-project name="platform/tools/tradefederation/prebuilts" />
-            <remove-project name="platform/platform_testing" />
-            <remove-project name="platform/superproject" />
-            <remove-project name="platform/developers/build" />
-            <remove-project name="platform/developers/samples/android" />
-            <remove-project name="platform/test/app_compat/csuite" />
-            <remove-project name="platform/test/catbox" />
-            <remove-project name="platform/test/cts-root" />
-            <remove-project name="platform/test/dittosuite" />
-            <remove-project name="platform/test/mlts/benchmark" />
-            <remove-project name="platform/test/mlts/models" />
-            <remove-project name="platform/test/mts" />
-            <remove-project name="platform/test/robolectric-extensions" />
-            <remove-project name="platform/test/suite_harness" />
-            <remove-project name="platform/test/vts" />
-            <remove-project name="platform/test/vts-testcase/hal" />
-            <remove-project name="platform/test/vts-testcase/kernel" />
-            <remove-project name="platform/test/vts-testcase/nbu" />
-            <remove-project name="platform/test/vts-testcase/performance" />
-            <remove-project name="platform/test/vts-testcase/security" />
-            <remove-project name="platform/test/vts-testcase/vndk" />
-            <remove-project name="device/generic/arm64" />
-            <remove-project name="device/generic/armv7-a-neon" />
-            <remove-project name="device/generic/art" />
-            <remove-project name="device/generic/car" />
-            <remove-project name="device/generic/common" />
-            <remove-project name="device/generic/goldfish" />
-            <remove-project name="device/generic/goldfish-opengl" />
-            <remove-project name="device/generic/trusty" />
-            <remove-project name="device/generic/x86" />
-            <remove-project name="device/generic/x86_64" />
-            <remove-project name="toolchain/pgo-profiles" />
-          </manifest>
-          EOF
+          # 说明：公开运行器根盘 146G（137G 可用），磁盘充足，无需精简清单。
+          # twrp-default.xml 本身已移除 cts 并替换为 TWRP fork。
           # 心跳：防运行器对长时间无输出 step 的清理
           (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) mem=$(free -m|awk 'NR==2{print $3}')MB disk=$(df -h .|tail -1|awk '{print $4}')"; sleep 60; done) & KA=$!
           ok=0
