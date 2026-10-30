@@ -56,15 +56,16 @@ jobs:
           create-symlink: true
           max-size: 3G
 
-      # 16GB 内存编 AOSP 容易 OOM，zram 当额外 swap（失败了不致命，上面已有 4G swap）
-      - name: Setup zram
-        continue-on-error: true
+      # 16GB 内存编 AOSP，Soong 分析模块图时会飙到 14GB+，默认 3GB swap 不够会被 OOM 杀。
+      # 磁盘有 137G 富余，这里建 16G swap 文件兜底。
+      - name: Setup swap (16GB)
         run: |
-          sudo apt-get install -y zram-tools || true
-          sudo modprobe zram || true
-          sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap 2>/dev/null || true
-          sudo systemctl restart zramswap 2>/dev/null || true
-          zramctl || true
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
           free -h
 
       - name: Install build dependencies
