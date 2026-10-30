@@ -54,7 +54,7 @@ jobs:
         with:
           root-reserve-mb: 1024
           temp-reserve-mb: 100
-          swap-size-mb: 4096
+          swap-size-mb: 8192
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -102,16 +102,16 @@ jobs:
       - name: Sync TWRP source
         run: |
           set -o pipefail
-          # 磁盘约束：全量同步会写满（Errno 28）；--depth=1 浅克隆又触发运行器被硬杀。
-          # 用 --partial-clone（blobless）折中：只要 ~50GB，且是标准 CI 做法。
-          repo init --partial-clone -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
-          # GitHub 运行器会杀掉长时间无输出的 step，这里每 30s 打一行心跳
-          (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) syncing..."; sleep 30; done) & KA=$!
+          # 磁盘约束：全量同步写满(Errno 28)；--partial-clone 太慢(6h超时)。
+          # 用 --depth=1 浅克隆(~50GB)；-j2 避免大仓库并行 checkout 内存 OOM 被硬杀。
+          repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          # 心跳：防运行器对长时间无输出 step 的清理
+          (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) mem=$(free -m|awk 'NR==2{print $3}')MB disk=$(df -h .|tail -1|awk '{print $4}')"; sleep 60; done) & KA=$!
           ok=0
           for i in 1 2 3; do
             echo "===== repo sync 第 $i 次 ====="
-            if repo sync -c -j4 --force-sync 2>&1 | tee sync.log; then ok=1; break; fi
-            echo "----- 失败，尾部 20 行 -----"; tail -20 sync.log; echo "----- 磁盘/内存 -----"; df -h .; free -h; sleep 5
+            if repo sync -c -j2 --no-tags --force-sync 2>&1 | tee sync.log; then ok=1; break; fi
+            echo "----- 失败，尾部 25 行 -----"; tail -25 sync.log; echo "----- 磁盘/内存 -----"; df -h .; free -h; sleep 5
           done
           kill $KA 2>/dev/null || true
           if [ "$ok" != "1" ]; then echo "!!! repo sync 三次均失败"; exit 1; fi
