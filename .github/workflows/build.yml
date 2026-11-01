@@ -90,7 +90,7 @@ jobs:
           set -o pipefail
           # 磁盘约束：全量同步写满(Errno 28)；--partial-clone 太慢(6h超时)。
           # 用 --depth=1 浅克隆(~50GB)；-j2 避免大仓库并行 checkout 内存 OOM 被硬杀。
-          repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp -b "${{ inputs.manifest_branch }}"
+          repo init --depth=1 -u https://github.com/kmiit/platform_manifest_twrp_aosp -b twrp-14
           # 说明：公开运行器根盘 146G（137G 可用），磁盘充足，无需精简清单。
           # twrp-default.xml 本身已移除 cts 并替换为 TWRP fork。
           # 心跳：防运行器对长时间无输出 step 的清理
@@ -110,27 +110,24 @@ jobs:
       - name: Clone device tree
         run: |
           set -e
-          mkdir -p device/oplus
-          git clone --depth=1 -b "${{ inputs.device_tree_branch }}" "${{ inputs.device_tree_url }}" device/oplus/sm87xx
-          ls device/oplus/sm87xx | head -20
+          mkdir -p device/OnePlus
+          git clone --depth=1 -b twrp-14 https://github.com/kmiit/android_device_oneplus_hummer-TWRP device/OnePlus/PKR110
+          ls device/OnePlus/PKR110 | head -20
 
       - name: Apply Android 17 overlay
-        if: inputs.variant == 'a17'
+        if: false  # hummer 设备树已内置解密组件，不需要 sm87xx overlay
         run: |
           set -e
-          cp -av /tmp/overlay-stash/. device/oplus/sm87xx/
-          chmod 755 device/oplus/sm87xx/recovery/root/system/bin/a17-diag.sh
+          cp -av /tmp/overlay-stash/. device/OnePlus/PKR110/
+          chmod 755 device/OnePlus/PKR110/recovery/root/system/bin/a17-diag.sh
           echo "--- 已改动文件 ---"
-          cd device/oplus/sm87xx && git status --porcelain
-          grep -n "TW_INCLUDE_CRYPTO_FBE\|TW_INCLUDE_FBE_METADATA\|TW_DEVICE_VERSION" BoardConfig.mk
+          cd device/OnePlus/PKR110 && git status --porcelain
 
       - name: Apply UI theme (紫金 + 背景图)
+        if: false  # hummer 是 TWRP-14 旧版 UI，不适用 twrp-16.0 的 gui2/LVGL 主题
         run: |
           set -e
           python3 /tmp/ui-theme-stash/apply_ui_theme.py
-          echo "--- 校验补丁 ---"
-          grep -n "twrp_background_image" bootable/recovery/gui2/shell/gui_shell_base.cpp | head -3
-          grep -n "0xB69CFF\|0xE8C15A\|0x241538" bootable/recovery/gui2/core/ui_metrics.cpp | head -5
 
       - name: Build recoveryimage
         run: |
@@ -143,20 +140,20 @@ jobs:
           export CCACHE_MAXSIZE=3G
           source build/envsetup.sh
           # 与上游作者验证过的写法一致：只给 product 名，不带 release/variant
-          lunch twrp_sm87xx
+          lunch twrp_PKR110-ap2a-eng
           env | grep -E '^TARGET_(PRODUCT|BUILD_VARIANT)=' || true
           df -h .
           (while true; do echo "[keepalive] $(date -u +%H:%M:%SZ) mem=$(free -m|awk 'NR==2{print $3}')MB disk=$(df -h .|tail -1|awk '{print $4}')"; sleep 60; done) & KA=$!
           make recoveryimage -j2 2>&1 | tee build.log
           kill $KA 2>/dev/null || true
-          ls -lh out/target/product/sm87xx/recovery.img
+          ls -lh out/target/product/PKR110/recovery.img
 
       - name: Collect artifact
         if: success()
         run: |
           set -e
-          SRC=out/target/product/sm87xx/recovery.img
-          DST="TWRP-sm87xx-${{ inputs.variant }}-$(date +%Y%m%d).img"
+          SRC=out/target/product/PKR110/recovery.img
+          DST="TWRP-PKR110-${{ inputs.variant }}-$(date +%Y%m%d).img"
           cp "$SRC" "$DST"
           ls -lh "$DST"
           sha256sum "$DST" | tee "$DST.sha256"
@@ -171,10 +168,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: TWRP-sm87xx-${{ inputs.variant }}
+          name: TWRP-PKR110-${{ inputs.variant }}
           path: |
-            TWRP-sm87xx-*.img
-            TWRP-sm87xx-*.img.sha256
+            TWRP-PKR110-*.img
+            TWRP-PKR110-*.img.sha256
           if-no-files-found: error
           retention-days: 30
 
