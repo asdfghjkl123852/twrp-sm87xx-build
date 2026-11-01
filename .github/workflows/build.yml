@@ -32,18 +32,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 关键：下一步会把扩容卷挂到 $GITHUB_WORKSPACE 覆盖掉 checkout 的内容，
-      # 所以 overlay 必须先搬到 /tmp（在根分区，体积很小不受影响）
-      - name: Stash overlay before volume mount
+      # 关键：repo sync 会用 AOSP 源码覆盖 $GITHUB_WORKSPACE 里 checkout 的内容，
+      # 所以 overlay 和 ui-theme 必须先搬到 /tmp（在根分区，不受影响）
+      - name: Stash overlay + UI theme before sync
         run: |
-          mkdir -p /tmp/overlay-stash
-          if [ "${{ inputs.variant }}" = "a17" ]; then
-            cp -a overlay/. /tmp/overlay-stash/
-            chmod 755 /tmp/overlay-stash/recovery/root/system/bin/a17-diag.sh
-            find /tmp/overlay-stash -type f | sed 's/^/  stashed: /'
-          else
-            echo "variant=baseline，不需要 overlay"
-          fi
+          mkdir -p /tmp/overlay-stash /tmp/ui-theme-stash
+          cp -a overlay/. /tmp/overlay-stash/ 2>/dev/null || true
+          chmod 755 /tmp/overlay-stash/recovery/root/system/bin/a17-diag.sh 2>/dev/null || true
+          cp -a ui-theme/. /tmp/ui-theme-stash/
+          echo "--- ui-theme stash ---"
+          ls -la /tmp/ui-theme-stash/
 
       # 只清理预装软件（slimhub），不再用 maximize-build-space：
       # 后者会把根盘用 /pv.img 塞到 100% 满，编译时 soong/make 写 /tmp 会直接把运行器搞崩。
@@ -125,6 +123,14 @@ jobs:
           echo "--- 已改动文件 ---"
           cd device/oplus/sm87xx && git status --porcelain
           grep -n "TW_INCLUDE_CRYPTO_FBE\|TW_INCLUDE_FBE_METADATA\|TW_DEVICE_VERSION" BoardConfig.mk
+
+      - name: Apply UI theme (紫金 + 背景图)
+        run: |
+          set -e
+          python3 /tmp/ui-theme-stash/apply_ui_theme.py
+          echo "--- 校验补丁 ---"
+          grep -n "twrp_background_image" bootable/recovery/gui2/shell/gui_shell_base.cpp | head -3
+          grep -n "0xB69CFF\|0xE8C15A\|0x241538" bootable/recovery/gui2/core/ui_metrics.cpp | head -5
 
       - name: Build recoveryimage
         run: |
