@@ -1,0 +1,10 @@
+# Charger
+ro.charger.enable_suspend=true
+
+# Gatekeeper（关键：禁用 SPU 安全级别，让解密走 QTI keymint 而非 OPPO SPU 路径）
+# 来自 kmiit 的 hummer 设备树 "Disable spu security" commit，缺失会导致 gatekeeper
+# 走 SPU 路径、卡在 SSGQMSCA（modem QMI），解密失败
+vendor.gatekeeper.is_security_level_spu=0
+
+# FUSE passthrough
+persist.sys.fuse.passthrough.enable=true

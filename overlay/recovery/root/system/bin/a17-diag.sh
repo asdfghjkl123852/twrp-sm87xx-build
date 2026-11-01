@@ -74,8 +74,37 @@ sec "VENDOR_DLKM MODULES (触摸/充电等)"
 ls -l /vendor_dlkm/lib/modules/ 2>/dev/null | head -60
 lsmod 2>/dev/null | head -40
 
+sec "CRASH REPLAY: 手动前台运行 HAL 捕获崩溃原因"
+# 逐个手动运行关键 HAL，前台捕获 stderr（能直接看到 CANNOT LINK / dlopen / 符号缺失 / TEE 通信失败）
+replay() {
+  name="$1"; bin="$2"
+  echo "--- 手动运行 $name ($bin) ---"
+  [ -x "$bin" ] || { echo "  (二进制不存在或不可执行: $bin)"; return; }
+  # 清空 logcat 后运行，抓崩溃输出
+  logcat -c 2>/dev/null
+  "$bin" > /tmp/replay.out 2>&1 &
+  pid=$!
+  sleep 4
+  kill -9 "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  echo "  ---- stderr/stdout ----"
+  cat /tmp/replay.out 2>/dev/null
+  echo "  ---- 相关 logcat ----"
+  logcat -d 2>/dev/null | grep -iE 'CANNOT LINK|cannot locate symbol|dlopen|linker|namespace|Fatal signal|SIGSEGV|SIGABRT|abort|weaver|qseecom|qsee|nxp|ese|keymint|keymaster|strongbox|TEE|spu' | tail -40
+}
+
+replay "weaver_nxp"   /vendor/odm/bin/hw/android.hardware.weaver-service.nxp
+replay "strongbox"    /vendor/odm/bin/hw/android.hardware.security.keymint-service.strongbox-nxp
+replay "qseecomd"     /vendor/bin/qseecomd
+replay "keymint-qti"  /vendor/bin/hw/android.hardware.security.keymint-service-qti
+replay "gatekeeper"   /vendor/bin/hw/android.hardware.gatekeeper-service-qti
+
+sec "SELINUX CONTEXT 检查 (keymint/gatekeeper/weaver/qseecom)"
+# 这些 context "not valid (left unmapped)" 是服务起不来的重要线索
+restorecon -Rv /vendor/bin/hw/ /vendor/odm/bin/hw/ /vendor/bin/qseecomd 2>&1 | grep -iE 'not valid|unmapped|keymint|gatekeeper|weaver|qseecom' | head -40
+
 sec "KEYSTORE LOG (vold/keystore 报错)"
-logcat -d -t 400 2>/dev/null | grep -Ei 'keymint|keymaster|gatekeeper|vold|fscrypt|metadata|decrypt|dm-crypt|ice' | tail -120
+logcat -d 2>/dev/null | grep -Ei 'keymint|keymaster|gatekeeper|vold|fscrypt|metadata|decrypt|dm-crypt|ice|weaver|qseecom' | tail -150
 
 sec "DMESG TAIL"
 dmesg 2>/dev/null | tail -200
