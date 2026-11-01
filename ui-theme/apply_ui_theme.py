@@ -42,7 +42,7 @@ new_bg = old_bg + (
     "  lv_image_set_src(twrp_bg, &twrp_background_image);\n"
     "  lv_image_set_inner_align(twrp_bg, LV_IMAGE_ALIGN_STRETCH);\n"
     "  lv_obj_set_size(twrp_bg, lv_pct(100), lv_pct(100));\n"
-    "  lv_obj_move_background(twrp_bg);\n"
+    "  lv_obj_move_to_index(twrp_bg, 0);\n"
 )
 txt = txt.replace(old_bg, new_bg, 1)
 open(sh, "w", encoding="utf-8").write(txt)
